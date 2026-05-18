@@ -472,6 +472,22 @@
   .nav-actions { display: flex; gap: 8px; align-items: center; }
   .nav-btn-text { display: inline; }
 
+  /* ── File extension badge ── */
+  .ext-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 38px;
+    height: 26px;
+    padding: 0 6px;
+    border-radius: 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
   /* ── Sync indicator ── */
   .sync-indicator {
     display: inline-flex;
@@ -683,6 +699,9 @@
   const GERA_FEE_PER_PAYMENT = 5000;
   const SUPABASE_URL = 'https://jdymwcpubsgftvdyeogt.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpkeW13Y3B1YnNnZnR2ZHllb2d0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMTU1NTQsImV4cCI6MjA5NDY5MTU1NH0.yZE-wZm2i5SEtEjqCDtTCa36tDYdphCGtP7vjVdVf58';
+  const ATTACHMENTS_BUCKET = 'attachments';
+  const MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024; // 25 MB
+  const SIGNED_URL_TTL = 60; // segundos para URLs de descarga
   const PARTNERS = ['MK directo', 'ELEMENTAL', 'SOMOS', 'IBIN'];
   const STATUSES = ['Activo', 'Pausado', 'Cerrado'];
   const LOG_TYPES = ['Nota', 'Hito', 'Reunión', 'Llamada', 'Email', 'Otro'];
@@ -765,6 +784,36 @@
     return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
 
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes < 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes/1024).toFixed(1)} KB`;
+    return `${(bytes/(1024*1024)).toFixed(1)} MB`;
+  };
+
+  const fileExtension = (name) => {
+    if (!name) return '';
+    const m = name.match(/\.([^.]+)$/);
+    return m ? m[1].toLowerCase() : '';
+  };
+
+  const fileTypeColor = (name) => {
+    const ext = fileExtension(name);
+    if (['pdf'].includes(ext)) return { bg: '#FCEBEB', text: '#501313' };           // rojo
+    if (['doc','docx'].includes(ext)) return { bg: '#E6F1FB', text: '#042C53' };    // azul
+    if (['xls','xlsx','csv'].includes(ext)) return { bg: '#EAF3DE', text: '#173404' }; // verde
+    if (['jpg','jpeg','png','gif','webp','heic','svg'].includes(ext)) return { bg: '#EEEDFE', text: '#26215C' }; // púrpura
+    if (['ppt','pptx'].includes(ext)) return { bg: '#FAEEDA', text: '#412402' };    // ámbar
+    return { bg: '#F4F3EE', text: '#5F5E5A' };                                       // neutro
+  };
+
+  const sanitizeFilename = (name) => {
+    return String(name || 'archivo')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '') // quita acentos
+      .replace(/[^\w.\-]/g, '_')
+      .slice(0, 120);
+  };
+
   const parseMoneyInput = (str) => {
     if (str == null) return 0;
     const cleaned = String(str).replace(/,/g, '').trim();
@@ -826,6 +875,9 @@
     upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
     menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>',
     logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+    paperclip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+    file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+    eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
   };
 
   // ═══════════════════════════════════════════════════════════════════
@@ -1047,6 +1099,143 @@
     if (btn) {
       btn.disabled = state.authLoading;
       btn.textContent = state.authLoading ? 'Entrando…' : 'Entrar';
+    }
+  }
+
+  // ═══ STORAGE / ATTACHMENTS ═══
+  async function uploadAttachments(files, projectId) {
+    if (!sb || !state.session) { alert('Necesitas estar autenticado para subir archivos.'); return; }
+    if (!navigator.onLine) { alert('Sin conexión. Necesitas internet para subir archivos.'); return; }
+    const project = getProject(projectId);
+    if (!project) return;
+
+    const list = Array.from(files);
+    const valid = [];
+    for (const f of list) {
+      if (f.size > MAX_ATTACHMENT_SIZE) {
+        alert(`"${f.name}" pesa ${formatFileSize(f.size)}. Máximo permitido: 25 MB.`);
+        continue;
+      }
+      valid.push(f);
+    }
+    if (valid.length === 0) return;
+
+    state.uploadingProjectId = projectId;
+    state.uploadingTotal = valid.length;
+    state.uploadingDone = 0;
+    render();
+
+    const userId = state.session.user.id;
+    project.attachments = project.attachments || [];
+
+    for (const file of valid) {
+      const attId = uid();
+      const safeName = sanitizeFilename(file.name);
+      const path = `${userId}/${projectId}/${attId}-${safeName}`;
+      try {
+        const { error } = await sb.storage.from(ATTACHMENTS_BUCKET).upload(path, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type || 'application/octet-stream',
+        });
+        if (error) throw error;
+        project.attachments.push({
+          id: attId,
+          name: file.name,
+          path,
+          size: file.size,
+          mimeType: file.type || '',
+          uploadedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        alert(`Error subiendo "${file.name}": ${e.message || e}`);
+      }
+      state.uploadingDone++;
+      // Re-renderizar el contador (sin perder estado de scroll)
+      updateUploadIndicator();
+    }
+    saveProjects();
+    state.uploadingProjectId = null;
+    state.uploadingTotal = 0;
+    state.uploadingDone = 0;
+    render();
+  }
+
+  function updateUploadIndicator() {
+    const el = document.getElementById('upload-progress');
+    if (!el) return;
+    if (state.uploadingProjectId) {
+      el.textContent = `Subiendo ${state.uploadingDone}/${state.uploadingTotal}…`;
+      el.style.display = '';
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
+  async function downloadAttachment(projectId, attId) {
+    if (!sb || !state.session) return;
+    if (!navigator.onLine) { alert('Sin conexión. Necesitas internet para descargar.'); return; }
+    const project = getProject(projectId);
+    if (!project) return;
+    const att = (project.attachments || []).find(a => a.id === attId);
+    if (!att) return;
+    try {
+      const { data, error } = await sb.storage
+        .from(ATTACHMENTS_BUCKET)
+        .createSignedUrl(att.path, SIGNED_URL_TTL, { download: att.name });
+      if (error) throw error;
+      window.open(data.signedUrl, '_blank');
+    } catch (e) {
+      alert(`Error descargando: ${e.message || e}`);
+    }
+  }
+
+  async function viewAttachment(projectId, attId) {
+    if (!sb || !state.session) return;
+    if (!navigator.onLine) { alert('Sin conexión. Necesitas internet para ver el archivo.'); return; }
+    const project = getProject(projectId);
+    if (!project) return;
+    const att = (project.attachments || []).find(a => a.id === attId);
+    if (!att) return;
+    try {
+      const { data, error } = await sb.storage
+        .from(ATTACHMENTS_BUCKET)
+        .createSignedUrl(att.path, SIGNED_URL_TTL);
+      if (error) throw error;
+      window.open(data.signedUrl, '_blank');
+    } catch (e) {
+      alert(`Error abriendo: ${e.message || e}`);
+    }
+  }
+
+  async function deleteAttachment(projectId, attId) {
+    const project = getProject(projectId);
+    if (!project) return;
+    const att = (project.attachments || []).find(a => a.id === attId);
+    if (!att) return;
+    if (!confirm(`¿Eliminar "${att.name}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      if (sb && navigator.onLine) {
+        const { error } = await sb.storage.from(ATTACHMENTS_BUCKET).remove([att.path]);
+        if (error) console.warn('Storage delete error (continuando):', error);
+      }
+      project.attachments = project.attachments.filter(a => a.id !== attId);
+      saveProjects();
+      render();
+    } catch (e) {
+      alert(`Error eliminando: ${e.message || e}`);
+    }
+  }
+
+  async function deleteProjectAttachments(project) {
+    // Llamado antes de eliminar un proyecto, para limpiar storage
+    if (!sb || !state.session || !navigator.onLine) return;
+    const paths = (project.attachments || []).map(a => a.path).filter(Boolean);
+    if (paths.length === 0) return;
+    try {
+      await sb.storage.from(ATTACHMENTS_BUCKET).remove(paths);
+    } catch (e) {
+      console.warn('No se pudieron limpiar archivos del proyecto:', e);
     }
   }
 
@@ -1325,6 +1514,7 @@
       p.payments = p.payments || [];
       p.milestones = p.milestones || [];
       p.logEntries = p.logEntries || [];
+      p.attachments = p.attachments || [];
       p.notes = p.notes || '';
       if (!p.scheduleType) p.scheduleType = p.hasSchedule ? 'milestones' : 'none';
       p.hasSchedule = p.scheduleType !== 'none';
@@ -1333,6 +1523,9 @@
         if (!pay.id) pay.id = uid();
         if (pay.geraFeeCollected == null) pay.geraFeeCollected = false;
         if (pay.geraFeeDate === undefined) pay.geraFeeDate = null;
+      });
+      p.attachments.forEach(a => {
+        if (!a.id) a.id = uid();
       });
     });
   }
@@ -2038,6 +2231,62 @@
       </div>
     `;
 
+    // Archivos adjuntos
+    const attachments = [...(p.attachments || [])].sort((a,b) => (b.uploadedAt||'').localeCompare(a.uploadedAt||''));
+    const isUploading = state.uploadingProjectId === p.id;
+    html += `
+      <div class="flex-between mt-24" style="margin-bottom:12px; gap:10px; flex-wrap:wrap;">
+        <h3 class="section-title" style="margin:0;">Archivos adjuntos</h3>
+        <div class="flex" style="gap:8px; align-items:center;">
+          <span id="upload-progress" class="muted" style="font-size:12px; display:${isUploading?'':'none'};">${isUploading?`Subiendo ${state.uploadingDone}/${state.uploadingTotal}…`:''}</span>
+          <button class="btn btn-sm ${isUploading?'':'btn-primary'}" data-action="trigger-upload" data-project-id="${p.id}" ${isUploading?'disabled':''}>
+            <span class="icon-inline">${ICONS.upload}</span> ${isUploading?'Subiendo…':'Subir archivo'}
+          </button>
+          <input type="file" id="attachment-file-input" multiple style="display:none;">
+        </div>
+      </div>
+      <div class="card" style="padding:0;">
+        ${attachments.length === 0
+          ? `<div class="empty" style="padding:28px;">Sin archivos. Sube contratos, propuestas, facturas o cualquier documento del proyecto. Máx 25 MB por archivo.</div>`
+          : `<table>
+              <thead>
+                <tr>
+                  <th>Archivo</th>
+                  <th class="text-right" style="width:90px;">Tamaño</th>
+                  <th style="width:120px;">Subido</th>
+                  <th class="text-right" style="width:140px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${attachments.map(a => {
+                  const ext = (fileExtension(a.name) || 'file').toUpperCase();
+                  const c = fileTypeColor(a.name);
+                  return `
+                    <tr>
+                      <td>
+                        <div class="flex" style="gap:10px; align-items:center;">
+                          <span class="ext-badge" style="background:${c.bg}; color:${c.text};">${escapeHtml(ext)}</span>
+                          <div style="min-width:0;">
+                            <div style="font-weight:500; word-break:break-word;">${escapeHtml(a.name)}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="text-right num">${formatFileSize(a.size)}</td>
+                      <td class="num muted" style="font-size:12px;">${fmtDate((a.uploadedAt||'').slice(0,10))}</td>
+                      <td class="text-right">
+                        <button class="btn-icon" title="Ver" data-action="view-attachment" data-project-id="${p.id}" data-attachment-id="${a.id}">${ICONS.eye}</button>
+                        <button class="btn-icon" title="Descargar" data-action="download-attachment" data-project-id="${p.id}" data-attachment-id="${a.id}">${ICONS.download}</button>
+                        <button class="btn-icon" title="Eliminar" data-action="delete-attachment" data-project-id="${p.id}" data-attachment-id="${a.id}">${ICONS.trash}</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>`
+        }
+      </div>
+    `;
+
     // Notas generales
     html += `
       <div class="flex-between mt-24" style="margin-bottom:12px;">
@@ -2372,6 +2621,19 @@
       });
     }
 
+    // Attachment file input
+    const attachmentInput = document.getElementById('attachment-file-input');
+    if (attachmentInput) {
+      attachmentInput.addEventListener('change', (e) => {
+        const files = e.target.files;
+        const pid = attachmentInput.dataset.projectId;
+        if (files && files.length && pid) {
+          uploadAttachments(files, pid);
+        }
+        e.target.value = '';
+      });
+    }
+
     // CRM filters
     document.querySelectorAll('[data-filter]').forEach(el => {
       const evt = el.tagName === 'INPUT' ? 'input' : 'change';
@@ -2491,11 +2753,14 @@
         const pid = el.dataset.projectId;
         const p = getProject(pid);
         if (!p) break;
+        const attachCount = (p.attachments || []).length;
+        const extraNote = attachCount > 0 ? ` También se eliminarán ${attachCount} archivo(s) adjunto(s).` : '';
         state.modal = { type: 'confirm', data: {
           title: 'Eliminar proyecto',
-          message: `¿Eliminar el proyecto "${p.name}"? Esta acción no se puede deshacer y eliminará todos sus pagos y fees asociados.`,
+          message: `¿Eliminar el proyecto "${p.name}"? Esta acción no se puede deshacer y eliminará todos sus pagos y fees asociados.${extraNote}`,
           confirmLabel: 'Eliminar',
-          onConfirm: () => {
+          onConfirm: async () => {
+            await deleteProjectAttachments(p);
             state.projects = state.projects.filter(x => x.id !== pid);
             saveProjects();
             state.view = 'crm';
@@ -2665,6 +2930,26 @@
         } else {
           pullFromRemote().then(r => { if (r.ok) { state.projects = r.projects; normalizeProjects(); render(); } });
         }
+        break;
+      }
+      case 'trigger-upload': {
+        const input = document.getElementById('attachment-file-input');
+        if (input) {
+          input.dataset.projectId = el.dataset.projectId;
+          input.click();
+        }
+        break;
+      }
+      case 'view-attachment': {
+        viewAttachment(el.dataset.projectId, el.dataset.attachmentId);
+        break;
+      }
+      case 'download-attachment': {
+        downloadAttachment(el.dataset.projectId, el.dataset.attachmentId);
+        break;
+      }
+      case 'delete-attachment': {
+        deleteAttachment(el.dataset.projectId, el.dataset.attachmentId);
         break;
       }
       case 'close-modal':
